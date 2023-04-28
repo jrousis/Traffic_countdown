@@ -2,7 +2,7 @@
 #define MAIN_H
 
 #define F_CPU 8000000UL
-
+#define RTC_prescaler 16
 #define	Ser_in	0		
 #define	Sclk	1
 #define	Enable	2
