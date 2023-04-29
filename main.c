@@ -4,13 +4,15 @@
  * Created: 25/4/2023 8:04:16 μμ
  * Author : user
  */ 
-#define verion 1.2
+#define verion 1.3
+#define SAMPLES_MAX 60
 
 #include "main.h"
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <util/delay.h>
 #include <avr/wdt.h>
+#include <avr/cpufunc.h>
 
 static const __flash char flash_fonts[] = {
 		0b11111111,0b11111100,0b00111111,0b11111111,	//0
@@ -44,7 +46,16 @@ uint16_t time_div = 0;
 uint32_t countdown_timer = 0;
 uint8_t time_disp_mem = 0;
 
+static uint8_t photo_samples[60];
+extern uint8_t sram_brigt=16;
+int8_t samples_metter=-1;
+uint16_t Timer_devide_photo=0;
+uint16_t Count_bright=0;
+uint16_t Timer_bright=0;
+
 uint8_t RGB_Index = 0; // Bit 2 = Blue -  Bit 1 = Green / Bit 0 = Red
+
+void photo_sample(void);
 
 void byte_out(int8_t data)
 {
@@ -73,6 +84,21 @@ void load_font(uint8_t character){
 	for(uint8_t i=0; i<4; i++)
 	{
 		byte_out(flash_fonts[offset - i]);
+	}
+}
+
+ISR(TIMER0_OVF_vect) {
+	Timer_bright++;
+	//bright = sram_brigt;}
+	
+	if (Timer_bright>=3){
+		Timer_bright=0;
+		Count_bright++;
+		if (sram_brigt>=Count_bright)
+		DISPLAY_ON();
+		else
+		DISPLAY_OFF();
+		if (Count_bright==16) {Count_bright=0;}
 	}
 }
 
@@ -109,10 +135,14 @@ ISR(TIMER2_OVF_vect) {
 			load_font(A);
 			do_rclk();
 			time_disp_mem = time_disp;
-		}
-				
-		
+		}	
 	}	
+	
+	Timer_devide_photo++;
+	if (Timer_devide_photo >= 48){
+		Timer_devide_photo = 0;
+		photo_sample();
+	}
 }
 
 ISR(INT1_vect)
@@ -146,14 +176,12 @@ ISR(INT1_vect)
 			{
 				measure_count_green = measure_count_green_2;
 			}
-		}
-		
+		}	
 		
 		red_on = 1;
 		//Set Rising edge
 		EICRA |= _BV(ISC11); EICRA |= _BV(ISC10);
-		
-		
+				
 	}else if (EICRA == 0b00001100){
 		//Detecting Green Lamp Start!
 		if (start_measure_red)
@@ -183,16 +211,9 @@ ISR(INT1_vect)
 		
 		red_on = 0;		
 		//Set faling edge 
-		EICRA |= _BV(ISC11); EICRA &= ~ _BV(ISC10);
-		
-		
+		EICRA |= _BV(ISC11); EICRA &= ~ _BV(ISC10);	
 	}
-	
-	
-	
 }
-
-
 
 int main(void)
 {
@@ -205,12 +226,21 @@ int main(void)
     EICRA |= _BV(ISC11); //&= ~
 	EICRA &= ~ _BV(ISC10);
 	
+	ADMUX = 0b01100110;
+	ADCSRA = 0b11100000;
+	ADCSRB = 0b00000100;
+	DIDR0 = 0b10111111;
 	
 	ASSR |= 1<<AS2;
 	//TCCR2B = 0b00000101; //start timer for seconds
 	TCCR2B = 0b00000010; //start timer for seconds
 	TIMSK2 = 1;
+	
+	TCCR0B = 0b00000010;
+	TIMSK0 = 1;
+		
 	_delay_ms(100);
+	photo_sample();
 	
 	RGB_Index = 0B00000111;
 	load_font(11); //'-'
@@ -226,7 +256,30 @@ int main(void)
     while (1) 
     {	
 		_delay_ms(500);
-		wdt_reset();
     }
 }
 
+void photo_sample(void){
+	uint8_t read_sample = ADCH;
+	if (read_sample<13){
+		read_sample = 16;
+		}else{
+		read_sample = 17-(read_sample / 16);
+	}
+	if (samples_metter==-1){
+		samples_metter=0;
+		sram_brigt = read_sample;
+	}
+	photo_samples[samples_metter] = read_sample;
+	samples_metter++;
+	if (samples_metter>=SAMPLES_MAX)
+	{
+		uint16_t A=0;
+		uint8_t i;
+		for (i=0;i<SAMPLES_MAX;i++){A += photo_samples[i];}
+		samples_metter=0;
+		sram_brigt = A/SAMPLES_MAX;
+		//uint8_t digits = eeprom_read_byte((uint8_t*)FAV_eep + DISPLAY_DIGITS);
+		//TLC_config_byte(sram_brigt,digits);
+	}
+}
